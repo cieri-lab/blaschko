@@ -1,0 +1,69 @@
+---
+title: "cibersortx_input"
+output: html_document
+date: "2024-05-21"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(Seurat)
+library(SeuratObject)
+library(SeuratDisk)
+library(anndata)
+```
+```{r}
+skin_so = readRDS("Bulk RNA/BLSKOGVH01/healthyskin.rds")
+sampled_cells = sample(x = colnames(skin_so), size = 6000, replace = F)
+skin_mat = skin_so@assays$RNA@counts[,sampled_cells]
+sampled_mat = skin_so@meta.data[colnames(skin_mat),]
+colnames(skin_mat) = sampled_mat$cell_type
+skin_mat = as.matrix((skin_mat))
+write.table(skin_mat,"Bulk RNA/BLSKOGVH01/healthyskin.txt",sep = '\t',quote = F)
+
+```
+```{r}
+AD.tpm <- read.delim(file="Bulk RNA/BLSKOGVH01/RNA-seQC/RP-2197_DFCI-BLSKOGVH-01-AD-01_v3_RNA_OnPrem.gene_tpm.gct.gz", skip=2)
+
+AE.tpm <- read.delim(file="Bulk RNA/BLSKOGVH01/RNA-seQC/RP-2197_DFCI-BLSKOGVH-01-AE-01_v3_RNA_OnPrem.gene_tpm.gct.gz", skip=2)
+
+UE.tpm <- read.delim(file="Bulk RNA/BLSKOGVH01/RNA-seQC/RP-2197_DFCI-BLSKOGVH-01-UE-01_v3_RNA_OnPrem.gene_tpm.gct.gz", skip=2)
+
+rownames(UE.tpm)  = UE.tpm$Name
+aload1$UE.tpm = UE.tpm[aload1$NA.,'RP.2197_DFCI.BLSKOGVH.01.UE.01_v3_RNA_OnPrem']
+rownames(AD.tpm)  = AD.tpm$Name
+aload1$AD.tpm = AD.tpm[aload1$NA.,'RP.2197_DFCI.BLSKOGVH.01.AD.01_v3_RNA_OnPrem']
+rownames(AE.tpm)  = AE.tpm$Name
+aload1$AE.tpm = AE.tpm[aload1$NA.,'RP.2197_DFCI.BLSKOGVH.01.AE.01_v3_RNA_OnPrem']
+
+mixture = merge(UE.tpm[,c('Description','RP.2197_DFCI.BLSKOGVH.01.UE.01_v3_RNA_OnPrem')],
+                AE.tpm[,c('Description','RP.2197_DFCI.BLSKOGVH.01.AE.01_v3_RNA_OnPrem')])
+
+
+mixture = merge(mixture,
+                AD.tpm[,c('Description','RP.2197_DFCI.BLSKOGVH.01.AD.01_v3_RNA_OnPrem')])
+
+colnames(mixture) = c("Gene","UE","AE","AD")
+
+mixture = distinct(mixture)
+mixture = mixture %>% group_by(Gene) %>% slice(1)
+write.table(mixture,"Bulk RNA/BLSKOGVH01/mixture.tsv",sep = '\t',quote = F,row.names = F)
+
+```
+
+```{r}
+#https://cellxgene.cziscience.com/collections/73f82ac8-15cc-4fcd-87f8-5683723fce7f S2
+skin_so = readRDS("/Users/yiren/Dropbox (Partners HealthCare)/Nico_Yiren/Data/Zebra patient/Bulk RNA/BLSKOGVH01/healthyskin2.rds")
+skin_so = subset(skin_so,subset = donor_id == "S2" )
+sampled_cells = sample(x = colnames(skin_so), size = 6000, replace = F)
+skin_mat = skin_so@assays$RNA@counts[,sampled_cells]
+sampled_mat = skin_so@meta.data[colnames(skin_mat),]
+colnames(skin_mat) = sampled_mat$cell_type
+skin_mat = as.matrix((skin_mat))
+ensembl.genes <- rownames(skin_mat)
+library('EnsDb.Hsapiens.v79')
+geneIDs1 <- ensembldb::select(EnsDb.Hsapiens.v79, keys= ensembl.genes, keytype = "GENEID", columns = c("SYMBOL","GENEID"))
+skin_mat = skin_mat[geneIDs1$GENEID,]
+rownames(skin_mat) = geneIDs1$SYMBOL
+write.table(skin_mat,"Bulk RNA/BLSKOGVH01/healthyskin2.txt",sep = '\t',quote = F)
+dim(skin_so)
+```

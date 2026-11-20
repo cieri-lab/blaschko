@@ -1,0 +1,142 @@
+---
+title: "zebra"
+output: html_document
+date: "2024-05-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tximport)
+library(rnaseqGene)
+library(DESeq2)
+library(EnsDb.Hsapiens.v86)
+library(pheatmap)
+library(RColorBrewer)
+library(PoiClaClu)
+library(sva)
+library(dplyr)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(factoextra)
+```
+
+```{r create object}
+samples = data.frame(sample = c("RP-2197_DFCI-BLSKOGVH-01-AD-01_v3_RNA_OnPrem.rsem","RP-2197_DFCI-BLSKOGVH-01-AE-01_v3_RNA_OnPrem.rsem","RP-2197_DFCI-BLSKOGVH-01-UE-01_v3_RNA_OnPrem.rsem"),ID = c("AD","AE","UE"),condition = c("affected","affected","unaffected"),
+                     layer = c("Dermis","Epidermis","Epidermis"))
+
+files <- file.path('/Bulk RNA/BLSKOGVH01', "RSEM",  paste0(samples$sample, ".genes.results.gz"))
+names(files) <-c("AD","AE","UE")
+txi.rsem <- tximport(files, type = "rsem", txIn = FALSE, txOut = FALSE)
+head(txi.rsem$counts)
+
+```
+```{r create object}
+txi.rsem$length[txi.rsem$length == 0] <- 1
+ensembl.genes <- rownames(txi.rsem$counts)
+geneIDs1 <- ensembldb::select(EnsDb.Hsapiens.v86, keys= substring(ensembl.genes,1,15), keytype = "GENEID", columns = c("SYMBOL","GENEID"))
+dds.rsem<- DESeqDataSetFromTximport(txi.rsem,
+                                   colData = samples,
+                                  design = ~  condition)
+```
+
+```{r prefiltering}
+#pre-filtering
+nrow(dds.rsem) #60669
+dds.prefiltered = dds.rsem[rowSums(counts(dds.rsem)) > 0 ,] #remove genes that are not expressed in any sample
+nrow(dds.prefiltered) #26849
+```
+
+
+```{r DGE}
+dds.prefiltered = DESeq(dds.prefiltered)
+res = results(dds.prefiltered)
+sum(res$padj < 0.05,na.rm = T) #103
+res$symbol = mapIds(org.Hs.eg.db,
+                    keys = substring(row.names(res),1,15),
+                    column = "SYMBOL",
+                    keytype = "ENSEMBL",
+                    multiVals = "first")
+
+res_tb = data.frame(genes = row.names(res),log2fc = res$log2FoldChange,padj = res$padj,symbol = res$symbol)
+
+resLFC1 = results(dds.prefiltered,lfcThreshold = 1)
+table(resLFC1$padj < 0.05)
+
+DEGs = na.omit(unique(rownames(res)[res$padj < 0.05]))
+DEGs_symbol = geneIDs1 %>% dplyr::filter(GENEID %in% substring(DEGs,1,15)) %>% dplyr::select(SYMBOL) %>% as.vector() %>% unlist()
+DEGsLFC1 = na.omit(unique(rownames(resLFC1)[resLFC1$padj < 0.05]))
+DEGsLFC1_symbol = geneIDs1 %>% dplyr::filter(GENEID %in% substring(DEGsLFC1,1,15)) %>% dplyr::select(SYMBOL) %>% as.vector() %>% unlist()
+resLFC1$symbol = mapIds(org.Hs.eg.db,
+                    keys = substring(row.names(resLFC1),1,15),
+                    column = "SYMBOL",
+                    keytype = "ENSEMBL",
+                    multiVals = "first")
+resLFC1$entrez = mapIds(org.Hs.eg.db,
+                    keys = substring(row.names(resLFC1),1,15),
+                    column = "ENTREZID",
+                    keytype = "ENSEMBL",
+                    multiVals = "first")
+resLFC1Ordered = resLFC1[order(resLFC1$padj),]
+topGene = rownames(resLFC1)[which.min(resLFC1$padj)]
+plotCounts(dds.prefiltered,gene = 'ENSG00000170454.6',intgroup = c("ID"),returnData = T)
+plotCounts(dds.prefiltered,gene = DEGsLFC1[30],intgroup = c("ID"),returnData = T)
+plotCounts(dds.prefiltered,gene = DEGsLFC1[23],intgroup = c("ID"),returnData = T)
+plotCounts(dds.prefiltered,gene = DEGsLFC1[26],intgroup = c("ID"),returnData = T)
+plotCounts(dds.prefiltered,gene = DEGsLFC1[38],intgroup = c("ID"),returnData = T)
+
+```
+```{r}
+
+pc = prcomp(t(assay(rld)[DEGs,]),rank. = 2)
+fviz_eig(pc)
+fviz_pca_ind(pc,
+             repel = TRUE     # Avoid text overlapping
+             )
+fviz_pca_var(pc,
+             col.var = "contrib", # Color by contributions to the PC
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE     # Avoid text overlapping
+             )
+loadings = as.data.frame(pc$rotation)
+aload = abs(loadings)
+sweep(aload, 2, colSums(aload), "/")
+aload$symbol = DEGs_symbol
+rownames(res_tb) = res_tb$genes
+aload$log2fc = res_tb[rownames(aload),'log2fc']
+aload$padj = res_tb[rownames(aload),'padj']
+xlsx::write.xlsx(aload,"~/Downloads/aload1.xlsx")
+```
+
+```{r}
+AD.tpm <- read.delim(file="Bulk RNA/BLSKOGVH01/RNA-seQC/RP-2197_DFCI-BLSKOGVH-01-AD-01_v3_RNA_OnPrem.gene_tpm.gct.gz", skip=2)
+AE.tpm <- read.delim(file="/Bulk RNA/BLSKOGVH01/RNA-seQC/RP-2197_DFCI-BLSKOGVH-01-AE-01_v3_RNA_OnPrem.gene_tpm.gct.gz", skip=2)
+UE.tpm <- read.delim(file="Bulk RNA/BLSKOGVH01/RNA-seQC/RP-2197_DFCI-BLSKOGVH-01-UE-01_v3_RNA_OnPrem.gene_tpm.gct.gz", skip=2)
+
+rownames(UE.tpm)  = UE.tpm$Name
+aload1$UE.tpm = UE.tpm[aload1$NA.,'RP.2197_DFCI.BLSKOGVH.01.UE.01_v3_RNA_OnPrem']
+rownames(AD.tpm)  = AD.tpm$Name
+aload1$AD.tpm = AD.tpm[aload1$NA.,'RP.2197_DFCI.BLSKOGVH.01.AD.01_v3_RNA_OnPrem']
+rownames(AE.tpm)  = AE.tpm$Name
+aload1$AE.tpm = AE.tpm[aload1$NA.,'RP.2197_DFCI.BLSKOGVH.01.AE.01_v3_RNA_OnPrem']
+
+xlsx::write.xlsx(aload1,"Bulk RNA/BLSKOGVH01/aload1.xlsx")
+```
+
+
+```{r}
+AD.tpm <- read.delim(file="Bulk RNA/blaschko01/RNA-seQC/RP-2197_DFCI-BLSKOGVH-01-AD-01_v3_RNA_OnPrem.gene_tpm.gct.gz", skip=2)
+
+AE.tpm <- read.delim(file="Bulk RNA/blaschko01/RNA-seQC/RP-2197_DFCI-BLSKOGVH-01-AE-01_v3_RNA_OnPrem.gene_tpm.gct.gz", skip=2)
+
+UE.tpm <- read.delim(file="Bulk RNA/blaschko01/RNA-seQC/RP-2197_DFCI-BLSKOGVH-01-UE-01_v3_RNA_OnPrem.gene_tpm.gct.gz", skip=2)
+
+rownames(UE.tpm)  = UE.tpm$Name
+TPM = merge(AD.tpm,AE.tpm)
+TPM = merge(TPM,UE.tpm)
+colnames(TPM) = c("GeneID","GeneSymbol","AD","AE","UE")
+openxlsx::write.xlsx(TPM,'Bulk RNA/blaschko01/TPM_0_AD_AE_UE.xlsx')
+```
+
